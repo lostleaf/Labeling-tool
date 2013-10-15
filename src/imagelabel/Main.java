@@ -14,6 +14,7 @@ import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.ImageData;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Canvas;
+import org.eclipse.swt.widgets.DirectoryDialog;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.FileDialog;
@@ -26,12 +27,13 @@ public class Main {
 	private Shell shell = null;
 	private Image image = null;
 	private Canvas canvas = null;
-	private Button loadButton = null, exportButton = null;
-	// private Label label = null;
+	private Button loadButton = null, exportButton = null, nextButton = null,
+			prevButton = null;
 	private Display display = Display.getDefault();
 	private List list = null;
-	private PointList pointList = null;
+	// private PointList pointList = null;
 	private MouseState mouseState = MouseState.NONE;
+	private FileManager fm = null;
 
 	class CanvasListener implements Listener, PaintListener {
 		int lastX = -1, lastY = -1, cur = -1;
@@ -43,17 +45,18 @@ public class Main {
 				if ((event.stateMask & SWT.BUTTON1) != 0) {
 					if (mouseState == MouseState.NONE) {
 						if (cur > -1)
-							pointList.set(cur, lastX, lastY, event.x, event.y);
+							setListItem(cur, lastX, lastY, event.x, event.y);
 					} else {
 						int dx = event.x - lastX, dy = event.y - lastY;
 						lastX = event.x;
 						lastY = event.y;
+
 						if (cur > -1)
-							pointList.update(cur, dx, dy, mouseState);
+							updateListItem(cur, dx, dy);
 					}
 
 				} else
-					setMouseState(pointList.calcState(event.x, event.y));
+					setMouseState(fm.calcState(event.x, event.y));
 				break;
 			case SWT.MouseUp:
 				cur = -1;
@@ -62,10 +65,10 @@ public class Main {
 				lastX = event.x;
 				lastY = event.y;
 				if (mouseState == MouseState.NONE) {
-					cur = pointList.size();
-					pointList.add(lastX, lastY, lastX, lastY);
+					cur = fm.listSize();
+					addListItem(lastX, lastY, lastX, lastY);
 				} else
-					cur = pointList.findCurrent(lastX, lastY);
+					cur = fm.findCurrent(lastX, lastY);
 				break;
 			}
 		}
@@ -76,8 +79,8 @@ public class Main {
 			if (image != null)
 				e.gc.drawImage(image, 0, 0);
 			e.gc.setLineWidth(3);
-			for (int i = 0; i < pointList.size(); i++) {
-				int[] a = pointList.get(i);
+			for (int i = 0; i < fm.listSize(); i++) {
+				int[] a = fm.get(i);
 				int upX = a[0], upY = a[1], downX = a[2], downY = a[3];
 				e.gc.drawRectangle(upX, upY, downX - upX, downY - upY);
 			}
@@ -94,24 +97,15 @@ public class Main {
 
 		@Override
 		public void widgetSelected(SelectionEvent arg0) {
-			FileDialog fileDialog = new FileDialog(shell, SWT.NONE);
-			fileDialog.setFilterExtensions(Util.PICTURE_EXTENSIONS);
+			DirectoryDialog fileDialog = new DirectoryDialog(shell, SWT.NONE);
 			String filePath = fileDialog.open();
 			if (filePath != null) {
 				// canvas.redraw();
 				System.out.println(filePath);
-				if (image != null)
-					image.dispose();
-				ImageData data = new ImageData(filePath);
-				if (data.width > 500 || data.height > 500) {
-					double rate = Math.min(((double) data.width) / 500,
-							((double) data.height) / 500);
-					data = data.scaledTo((int) (data.width / rate),
-							(int) (data.height / rate));
-				}
-				image = new Image(display, data);
-				canvas.setData(image);
-				canvas.redraw();
+				fm = new FileManager(new File(filePath));
+				if (fm.hasNext())
+					nextButton.setEnabled(true);
+				refresh();
 			}
 		}
 	}
@@ -135,8 +129,8 @@ public class Main {
 				} catch (FileNotFoundException e1) {
 					e1.printStackTrace();
 				}
-				for (int i = 0; i < pointList.size(); i++) {
-					int[] a = pointList.get(i);
+				for (int i = 0; i < fm.listSize(); i++) {
+					int[] a = fm.get(i);
 					int upX = a[0], upY = a[1], downX = a[2], downY = a[3];
 					p.println(Util.coorToString(upX, upY, downX, downY));
 				}
@@ -146,7 +140,72 @@ public class Main {
 
 	}
 
+	class NextListener implements SelectionListener {
+
+		@Override
+		public void widgetDefaultSelected(SelectionEvent e) {
+
+		}
+
+		@Override
+		public void widgetSelected(SelectionEvent e) {
+			fm.save();
+			if (fm.hasNext()) {
+				fm.next();
+				prevButton.setEnabled(true);
+				nextButton.setEnabled(fm.hasNext());
+				refresh();
+			}
+		}
+
+	}
+
+	class PreviousListener implements SelectionListener {
+
+		@Override
+		public void widgetDefaultSelected(SelectionEvent e) {
+
+		}
+
+		@Override
+		public void widgetSelected(SelectionEvent e) {
+			fm.save();
+			if (fm.hasPrevious()) {
+				fm.previous();
+				nextButton.setEnabled(true);
+				prevButton.setEnabled(fm.hasNext());
+				refresh();
+			}
+		}
+
+	}
+
+	private void refresh() {
+		setImage(fm.getImage());
+		list.removeAll();
+		for (int[] a : fm.getList()) {
+			int upX = a[0], upY = a[1], downX = a[2], downY = a[3];
+			list.add(Util.coorToString(upX, upY, downX, downY));
+		}
+		doRedraw();
+	}
+
 	public void doRedraw() {
+		canvas.redraw();
+	}
+
+	public void setImage(File imageFile) {
+		if (image != null)
+			image.dispose();
+		ImageData data = new ImageData(imageFile.getAbsolutePath());
+		if (data.width > 500 || data.height > 500) {
+			double rate = Math.min(((double) data.width) / 500,
+					((double) data.height) / 500);
+			data = data.scaledTo((int) (data.width / rate),
+					(int) (data.height / rate));
+		}
+		image = new Image(display, data);
+		canvas.setData(image);
 		canvas.redraw();
 	}
 
@@ -168,12 +227,13 @@ public class Main {
 
 	public void createContents() {
 		shell = new Shell(display);
-		pointList = new PointList(this);
-		// image = new Image(display, "eclipse48.gif");
 		canvas = new Canvas(shell, SWT.BORDER);
-		// label = new Label(shell, SWT.BORDER);
 		loadButton = new Button(shell, SWT.PUSH);
 		exportButton = new Button(shell, SWT.PUSH);
+		prevButton = new Button(shell, SWT.PUSH);
+		prevButton.setEnabled(false);
+		nextButton = new Button(shell, SWT.PUSH);
+		nextButton.setEnabled(false);
 		list = new List(shell, SWT.SINGLE | SWT.V_SCROLL | SWT.BORDER);
 	}
 
@@ -181,8 +241,9 @@ public class Main {
 		shell.setSize(800, 600);
 		canvas.setBounds(10, 10, 500, 500);
 		loadButton.setBounds(10, 520, 50, 30);
-		exportButton.setBounds(70, 520, 50, 30);
-		// label.setBounds(70, 520, 200, 30);
+		//exportButton.setBounds(70, 520, 50, 30);
+		prevButton.setBounds(130, 520, 60, 30);
+		nextButton.setBounds(200, 520, 60, 30);
 		list.setBounds(530, 10, 200, 500);
 	}
 
@@ -194,29 +255,53 @@ public class Main {
 		canvas.addPaintListener(canvasListener);
 		loadButton.addSelectionListener(new LoadListener());
 		exportButton.addSelectionListener(new ExportListener());
-
+		nextButton.addSelectionListener(new NextListener());
+		prevButton.addSelectionListener(new PreviousListener());
 	}
 
-	public void setListItem(int index, String str) {
-		list.setItem(index, str);
+	public void setListItem(int index, int upX, int upY, int downX, int downY) {
+		fm.set(index, upX, upY, downX, downY);
+		list.setItem(index, Util.coorToString(upX, upY, downX, downY));
+		doRedraw();
 	}
 
-	public void setListItems(String[] s) {
-		list.setItems(s);
+	public void updateListItem(int cur, int dx, int dy) {
+		int[] a = fm.get(cur);
+		int upX = a[0], upY = a[1], downX = a[2], downY = a[3];
+		int nupX = upX, nupY = upY, ndownX = downX, ndownY = downY;
+
+		if (mouseState != MouseState.SIZESE) {
+			nupX += dx;
+			nupY += dy;
+		}
+		if (mouseState != MouseState.SIZENW) {
+			ndownX += dx;
+			ndownY += dy;
+		}
+		setListItem(cur, nupX, nupY, ndownX, ndownY);
 	}
 
-	public void addListItem(String s) {
-		list.add(s);
+	public void addListItem(int upX, int upY, int downX, int downY) {
+		fm.add(upX, upY, downX, downY);
+		list.add(Util.coorToString(upX, upY, downX, downY));
+		doRedraw();
+	}
+
+	private void setText() {
+		loadButton.setText("Load");
+		shell.setText("Labelling tool");
+		exportButton.setText("Export");
+		prevButton.setText("Previous");
+		nextButton.setText("Next");
 	}
 
 	public Main() {
+		fm = new FileManager();
 		createContents();
 		addListeners();
 
 		shell.open();
-		loadButton.setText("Load");
-		shell.setText("Labelling tool");
-		exportButton.setText("Export");
+		setText();
 
 		setPosition();
 		while (!shell.isDisposed()) {
@@ -224,6 +309,7 @@ public class Main {
 				display.sleep();
 		}
 		display.dispose();
+		fm.save();
 	}
 
 	public static void main(String[] args) {
