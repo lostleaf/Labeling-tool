@@ -1,0 +1,1 @@
+java -cp "labeling.jar;swt-win32.jar"  imagelabel.Main
